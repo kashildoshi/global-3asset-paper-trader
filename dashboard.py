@@ -1,6 +1,5 @@
-import os, sqlite3, requests
+﻿import os, sqlite3, requests
 import pandas as pd
-import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timezone
@@ -38,26 +37,25 @@ ASSETS = {
     "SI=F":    {"label": "SILVER FUTURES (XAG)", "session": "24/5 COMEX GLOBEX"},
 }
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=1)
 def get_quote(ticker):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=4).json()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=2d"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3).json()
         res = r["chart"]["result"][0]
         meta = res["meta"]
         ltp = float(meta.get("regularMarketPrice", 0))
-        closes = [c for c in res.get("indicators", {}).get("quote", [{}])[0].get("close", []) if c is not None]
-        prev = float(closes[-2]) if len(closes) >= 2 else float(meta.get("previousClose", ltp))
+        prev = float(meta.get("chartPreviousClose") or meta.get("previousClose") or ltp)
         chg = ltp - prev
         pct = (chg / prev * 100.0) if prev else 0.0
         return ltp, chg, pct
     except Exception:
         return 0.0, 0.0, 0.0
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=2)
 def get_candles(ticker, interval="15m", rng="5d"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={rng}"
-    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=4).json()
     res = r["chart"]["result"][0]
     ts = res["timestamp"]
     q = res["indicators"]["quote"][0]
@@ -77,59 +75,64 @@ def load_trades():
     conn.close()
     return df
 
-# Header Bar
-h1, h2 = st.columns([3, 1])
-with h1:
-    st.markdown("### 🌐 Global 3-Asset AI Paper Terminal — USD (`$`)")
-with h2:
-    utc_now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-    st.markdown(f'<div style="text-align:right;padding-top:10px;"><span class="badge-247">● 24/7 ENGINE LIVE • {utc_now}</span></div>', unsafe_allow_html=True)
+c_sel1, c_sel2 = st.columns([1.4, 1])
+selected = c_sel1.selectbox("Select Active Chart", list(ASSETS.keys()), format_func=lambda k: f"{k} — {ASSETS[k]['label']}")
+tf = c_sel2.selectbox("Candle Interval", ["5m", "15m", "1h"], index=1)
 
-# 3-Asset Top Cards (Bitcoin, Gold, Silver)
-cols = st.columns(3)
-for idx, (tkr, info) in enumerate(ASSETS.items()):
-    ltp, chg, pct = get_quote(tkr)
-    cls = "pos" if chg >= 0 else "neg"
-    sign = "+" if chg >= 0 else ""
-    with cols[idx]:
-        st.markdown(f"""
-        <div class="ticker-card">
-            <div class="ticker-title">{info['label']} • {info['session']}</div>
-            <div class="ticker-price">${ltp:,.2f}</div>
-            <div class="{cls}">{sign}${chg:,.2f} ({sign}{pct:.2f}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
+@st.fragment(run_every=1)
+def live_terminal_stream():
+    h1, h2 = st.columns([3, 1])
+    with h1:
+        st.markdown("### 🌐 Global 3-Asset AI Paper Terminal — USD (`$`)")
+    with h2:
+        utc_now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+        st.markdown(f'<div style="text-align:right;padding-top:10px;"><span class="badge-247">● 1s LIVE FEED • {utc_now}</span></div>', unsafe_allow_html=True)
 
-st.write("")
+    cols = st.columns(3)
+    live_prices = {}
+    for idx, (tkr, info) in enumerate(ASSETS.items()):
+        ltp, chg, pct = get_quote(tkr)
+        live_prices[tkr] = ltp
+        cls = "pos" if chg >= 0 else "neg"
+        sign = "+" if chg >= 0 else ""
+        with cols[idx]:
+            st.markdown(f"""
+            <div class="ticker-card">
+                <div class="ticker-title">{info['label']} • {info['session']}</div>
+                <div class="ticker-price">${ltp:,.2f}</div>
+                <div class="{cls}">{sign}${chg:,.2f} ({sign}{pct:.2f}%)</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-# Portfolio Summary + Controls
-trades_df = load_trades()
-realized_pnl = float(trades_df[trades_df["status"] == "CLOSED"]["pnl"].fillna(0).sum()) if not trades_df.empty and "pnl" in trades_df.columns else 0.0
-open_count = int((trades_df["status"] == "OPEN").sum()) if not trades_df.empty and "status" in trades_df.columns else 0
-capital = 1000.0 + realized_pnl
+    st.write("")
+    trades_df = load_trades()
+    realized_pnl = float(trades_df[trades_df["status"] == "CLOSED"]["pnl"].fillna(0).sum()) if not trades_df.empty and "pnl" in trades_df.columns else 0.0
+    open_count = int((trades_df["status"] == "OPEN").sum()) if not trades_df.empty and "status" in trades_df.columns else 0
+    capital = 1000.0 + realized_pnl
 
-c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
-selected = c1.selectbox("Select Active Chart", list(ASSETS.keys()), format_func=lambda k: f"{k} — {ASSETS[k]['label']}")
-tf = c2.selectbox("Candle Interval", ["5m", "15m", "1h"], index=1)
-c3.metric("Paper Account Balance (USD)", f"${capital:,.2f}", f"${realized_pnl:+,.2f} Net P&L")
-c4.metric("Active Open Positions", f"{open_count} / 3", "AI Gate: > 65% Prob")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Paper Account Balance (USD)", f"${capital:,.2f}", f"${realized_pnl:+,.2f} Net P&L")
+    m2.metric("Active Open Positions", f"{open_count} / 3", "AI Gate: > 65% Prob")
+    m3.metric(f"{selected} Live Tick", f"${live_prices.get(selected, 0):,.2f}", "Refreshing every 1s")
 
-# Interactive Candlestick Chart
-df = get_candles(selected, tf, "5d" if tf != "1h" else "1mo")
-fig = go.Figure()
-fig.add_trace(go.Candlestick(x=df["time"], open=df["open"], high=df["high"], low=df["low"], close=df["close"], name=selected))
-fig.add_trace(go.Scatter(x=df["time"], y=df["ema9"], line=dict(color="#38bdf8", width=1.4), name="EMA 9"))
-fig.add_trace(go.Scatter(x=df["time"], y=df["ema21"], line=dict(color="#f59e0b", width=1.4), name="EMA 21"))
-fig.update_layout(
-    template="plotly_dark", height=440, margin=dict(l=10, r=10, t=25, b=10),
-    xaxis_rangeslider_visible=False, paper_bgcolor="#0f141e", plot_bgcolor="#0f141e",
-    yaxis_title="Price (USD $)"
-)
-st.plotly_chart(fig, use_container_width=True)
+    df = get_candles(selected, tf, "5d" if tf != "1h" else "1mo")
+    if not df.empty and live_prices.get(selected, 0) > 0:
+        df.iloc[-1, df.columns.get_loc("close")] = live_prices[selected]
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df["time"], open=df["open"], high=df["high"], low=df["low"], close=df["close"], name=selected))
+    fig.add_trace(go.Scatter(x=df["time"], y=df["ema9"], line=dict(color="#38bdf8", width=1.4), name="EMA 9"))
+    fig.add_trace(go.Scatter(x=df["time"], y=df["ema21"], line=dict(color="#f59e0b", width=1.4), name="EMA 21"))
+    fig.update_layout(
+        template="plotly_dark", height=430, margin=dict(l=10, r=10, t=20, b=10),
+        xaxis_rangeslider_visible=False, paper_bgcolor="#0f141e", plot_bgcolor="#0f141e",
+        yaxis_title="Price (USD $)", uirevision=f"{selected}-{tf}"
+    )
+    st.plotly_chart(fig, use_container_width=True, key="live_3asset_chart")
 
-# Live Trade Ledger
-st.markdown("#### 📋 Autonomous 24/7 Trade Ledger (USD)")
-if trades_df.empty:
-    st.info("No trades logged yet. Cloud engine scans BTC-USD (24/7), GC=F, and SI=F continuously and enters when Time-Machine probability > 65%.")
-else:
-    st.dataframe(trades_df, use_container_width=True)
+    st.markdown("#### 📋 Autonomous 24/7 Trade Ledger (USD)")
+    if trades_df.empty:
+        st.info("No trades logged yet. Cloud engine scans BTC-USD (24/7), GC=F, and SI=F continuously and enters when Time-Machine probability > 65%.")
+    else:
+        st.dataframe(trades_df, use_container_width=True)
+
+live_terminal_stream()
