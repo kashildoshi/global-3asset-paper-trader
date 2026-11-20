@@ -1,0 +1,38 @@
+{
+  "as_of": "2026-11-18T10:00:00+05:30",
+  "currency": "INR",
+  "unit": "crore",
+  "note": "Illustrative NSE metrics schema example in INR crore (not live filings)",
+  "companies": {
+    "RELIANCE": {
+      "latest_quarter": "2026-09-30",
+      "consolidated": true,
+      "revenue_cr": 235480.0,
+      "net_profit_cr": 19100.0,
+      "net_margin_pct": 8.11,
+      "yoy_rev_pct": 6.4,
+      "yoy_pat_pct": 8.2,
+      "eps_diluted": 14.12
+    },
+    "TCS": {
+      "latest_quarter": "2026-09-30",
+      "consolidated": true,
+      "revenue_cr": 64259.0,
+      "net_profit_cr": 12040.0,
+      "net_margin_pct": 18.74,
+      "yoy_rev_pct": 7.6,
+      "yoy_pat_pct": 5.0,
+      "eps_diluted": 33.25
+    },
+    "HDFCBANK": {
+      "latest_quarter": "2026-09-30",
+      "consolidated": true,
+      "revenue_cr": 85400.0,
+      "net_profit_cr": 17825.0,
+      "net_margin_pct": 20.87,
+      "yoy_rev_pct": 9.1,
+      "yoy_pat_pct": 5.3,
+      "eps_diluted": 23.40
+    }
+  }
+}
