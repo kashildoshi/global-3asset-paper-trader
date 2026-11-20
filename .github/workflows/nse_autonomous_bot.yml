@@ -1,26 +1,40 @@
-name: Global 3-Asset Paper Trader (BTC-Gold-Silver)
+﻿name: Global 3-Asset Paper Trader (BTC-Gold-Silver)
+
 on:
   schedule:
     - cron: '*/15 * * * *'
-    - cron: '*/15 * * * *'
-    - cron: '*/15 * * * *'
   workflow_dispatch:
-concurrency:
-  group: nse-5sec-runner
-  cancel-in-progress: false
+
 permissions:
   contents: write
+
 jobs:
-  trade-cycle:
+  trade-loop:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    concurrency:
+      group: global-3asset-runner
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - env:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas numpy
+
+      - name: Run 24/7 3-Asset Paper Trading Cycle
+        env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python cloud_cycle.py
+
+      - name: Save Updated Trade Ledger to Repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add paper_trades.db
+          git diff --staged --quiet || (git commit -m "Sync 3-asset paper trades" && git push)

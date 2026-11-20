@@ -1,4 +1,4 @@
-import requests
+﻿import requests
 import pandas as pd
 import numpy as np
 
@@ -19,7 +19,8 @@ def fetch_candles(ticker, interval="5m", range_str="5d"):
         "low": q["low"],
         "close": q["close"],
         "volume": q["volume"]
-    }).dropna()
+    }).dropna(subset=["open", "high", "low", "close"])
+    df["volume"] = df["volume"].fillna(1.0)
     return df
 
 def evaluate_asset(ticker):
@@ -32,7 +33,7 @@ def evaluate_asset(ticker):
     gain = delta.clip(lower=0).rolling(14).mean()
     loss = (-delta.clip(upper=0)).rolling(14).mean()
     rs = gain / loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
+    df["rsi"] = (100 - (100 / (1 + rs))).fillna(50.0)
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - df["close"].shift()).abs(),
@@ -43,22 +44,22 @@ def evaluate_asset(ticker):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     price = float(last["close"])
-    vol_ratio = float(last["volume"] / max(df["volume"].tail(20).mean(), 1))
+    vol_ratio = float(last["volume"] / max(df["volume"].tail(20).mean(), 1.0))
 
     prob = 50.0
     side = None
     reasons = []
 
-    if last["ema9"] > last["ema21"] and price > last["ema9"] and 52 <= last["rsi"] <= 72:
+    if last["ema9"] > last["ema21"] and price > last["ema9"] and 50.0 <= last["rsi"] <= 88.0:
         side = "LONG"
-        prob += 12.0 + min(vol_ratio * 4.0, 10.0)
+        prob += 10.0 + min(vol_ratio * 3.0, 10.0)
         reasons.append(f"EMA 9/21 Bullish + RSI {last['rsi']:.1f}")
         if price > prev["high"]:
             prob += 5.0
             reasons.append("5m High Breakout")
-    elif last["ema9"] < last["ema21"] and price < last["ema9"] and 28 <= last["rsi"] <= 48:
+    elif last["ema9"] < last["ema21"] and price < last["ema9"] and 12.0 <= last["rsi"] <= 50.0:
         side = "SHORT"
-        prob += 12.0 + min(vol_ratio * 4.0, 10.0)
+        prob += 10.0 + min(vol_ratio * 3.0, 10.0)
         reasons.append(f"EMA 9/21 Bearish + RSI {last['rsi']:.1f}")
         if price < prev["low"]:
             prob += 5.0
@@ -87,6 +88,6 @@ def scan_full_nse_universe(min_prob=55.0):
             sig = evaluate_asset(t)
             if sig and sig["prob"] >= min_prob:
                 signals.append(sig)
-        except Exception:
-            continue
+        except Exception as e:
+            print(f"Scan error on {t}: {e}")
     return sorted(signals, key=lambda x: x["prob"], reverse=True)
