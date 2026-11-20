@@ -1,4 +1,4 @@
-﻿import os, sqlite3, re
+import os, sqlite3, re
 
 # 1. Reset fresh USD paper_trades.db with full schema
 if os.path.exists("paper_trades.db"):
@@ -110,7 +110,7 @@ def evaluate_asset(ticker):
         "reason": f"{'BUY->SELL' if side=='LONG' else 'SELL->BUY'} | " + " + ".join(reasons)
     }
 
-def scan_full_nse_universe(min_prob=65.0):
+def scan_full_nse_universe(min_prob=55.0):
     signals = []
     for t in ASSETS:
         try:

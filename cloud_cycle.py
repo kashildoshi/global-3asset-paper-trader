@@ -67,10 +67,10 @@ def run_cycle():
                 send_tg(f"🔔 *3-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.2f}` → Exit: `${ltp:,.2f}`\nNet P&L: `${pnl:+,.2f}`")
     conn.commit()
 
-    # 2. Scan BTC-USD (24/7), GC=F, and SI=F for new setups (> 65% probability)
+    # 2. Scan BTC-USD (24/7), GC=F, and SI=F for new setups (> 55% probability)
     open_syms = {r[1] for r in cur.execute("SELECT id, symbol FROM trades WHERE status='OPEN'").fetchall()}
     if len(open_syms) < 3:
-        signals = nse_scanner.scan_full_nse_universe(min_prob=65.0)
+        signals = nse_scanner.scan_full_nse_universe(min_prob=55.0)
         for sig in signals:
             if sig["symbol"] in open_syms or len(open_syms) >= 3:
                 continue

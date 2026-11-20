@@ -1,4 +1,4 @@
-﻿import os, json, time, sqlite3, threading, requests
+import os, json, time, sqlite3, threading, requests
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pandas as pd
 import streamlit as st
@@ -193,7 +193,7 @@ c1, c2, c3, c4, c5 = st.columns([1.3, 0.9, 1, 1, 0.7])
 selected = c1.selectbox("Active Chart Asset", list(ASSETS.keys()), format_func=lambda k: f"{k} — {ASSETS[k]['label']}")
 tf = c2.selectbox("Candle Interval", ["5m", "15m", "1h"], index=1)
 c3.metric("Paper Account Balance (USD)", f"${capital:,.2f}", f"${realized_pnl:+,.2f} Net P&L")
-c4.metric("Active Open Positions", f"{open_count} / 3", "AI Gate: > 65% Prob")
+c4.metric("Active Open Positions", f"{open_count} / 3", "AI Gate: > 55% Prob")
 with c5:
     st.write("")
     if st.button("🔄 Sync Chart"):
@@ -214,6 +214,6 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("#### 📋 Autonomous 24/7 Trade Ledger (USD)")
 if trades_df.empty:
-    st.info("No trades logged yet. Cloud engine scans BTC-USD (24/7), GC=F, and SI=F continuously and enters when Time-Machine probability > 65%.")
+    st.info("No trades logged yet. Cloud engine scans BTC-USD (24/7), GC=F, and SI=F continuously and enters when Time-Machine probability > 55%.")
 else:
     st.dataframe(trades_df, use_container_width=True)

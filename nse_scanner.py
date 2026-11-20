@@ -80,7 +80,7 @@ def evaluate_asset(ticker):
         "reason": f"{'BUY->SELL' if side=='LONG' else 'SELL->BUY'} | " + " + ".join(reasons)
     }
 
-def scan_full_nse_universe(min_prob=65.0):
+def scan_full_nse_universe(min_prob=55.0):
     signals = []
     for t in ASSETS:
         try:
