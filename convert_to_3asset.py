@@ -1,4 +1,14 @@
-import os, sqlite3, re
+﻿
+import subprocess as _sp
+def _sync_cloud_db():
+    try:
+        _sp.run(["git", "fetch", "origin", "main"], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=8)
+        _sp.run(["git", "checkout", "origin/main", "--", "paper_trades.db"], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=8)
+    except Exception:
+        pass
+_sync_cloud_db()
+
+ï»¿import os, sqlite3, re
 
 # 1. Reset fresh USD paper_trades.db with full schema
 if os.path.exists("paper_trades.db"):
@@ -27,15 +37,15 @@ CREATE TABLE trades (
 conn.commit()
 conn.close()
 
-# 2. Create clean 3-asset scanner (BTC-USD, GC=F, SI=F)
+# 2. Create clean 3-asset scanner (BTC-USD, XAUT, XAGT)
 scanner_code = '''import requests
 import pandas as pd
 import numpy as np
 
 ASSETS = {
     "BTC-USD": "Bitcoin (BTC)",
-    "GC=F": "Gold Futures (XAU)",
-    "SI=F": "Silver Futures (XAG)"
+    "XAUT": "Gold Futures (XAU)",
+    "XAGT": "Silver Futures (XAG)"
 }
 
 def fetch_candles(ticker, interval="5m", range_str="5d"):
@@ -132,22 +142,22 @@ with open("nse_holidays.py", "w", encoding="utf-8") as f:
 if os.path.exists("cloud_cycle.py"):
     with open("cloud_cycle.py", "r", encoding="utf-8") as f:
         cc = f.read()
-    cc = cc.replace("₹", "$").replace(".NS", "")
+    cc = cc.replace("Ã¢â€šÂ¹", "$").replace(".NS", "")
     cc = re.sub(r"if\s+not\s+is_open.*?:.*?return", "", cc, flags=re.S)
     cc = cc.replace("(15, 30)", "(23, 59)").replace("(15, 5)", "(23, 59)").replace("(15, 20)", "(23, 59)")
     cc = cc.replace("(9, 0)", "(0, 0)").replace("(9, 15)", "(0, 0)")
     with open("cloud_cycle.py", "w", encoding="utf-8") as f:
         f.write(cc)
 
-# 5. Patch dashboard.py for BTC-USD, GC=F, SI=F in USD ($)
+# 5. Patch dashboard.py for BTC-USD, XAUT, XAGT in USD ($)
 if os.path.exists("dashboard.py"):
     with open("dashboard.py", "r", encoding="utf-8") as f:
         db = f.read()
-    db = db.replace("₹", "$").replace("NSE Alpha Terminal", "Global 3-Asset Terminal (BTC • Gold • Silver)")
-    db = db.replace('"NIFTY 50": "%5ENSEI"', '"BITCOIN": "BTC-USD"').replace('"NIFTY BANK": "%5ENSEBANK"', '"GOLD": "GC=F"')
+    db = db.replace("Ã¢â€šÂ¹", "$").replace("NSE Alpha Terminal", "Global 3-Asset Terminal (BTC Ã¢â‚¬Â¢ Gold Ã¢â‚¬Â¢ Silver)")
+    db = db.replace('"NIFTY 50": "%5ENSEI"', '"BITCOIN": "BTC-USD"').replace('"NIFTY BANK": "%5ENSEBANK"', '"GOLD": "XAUT"')
     db = db.replace("NIFTY 50", "BITCOIN (BTC)").replace("NIFTY BANK", "GOLD (XAU)")
     db = db.replace('f"{clean}.NS"', 'clean').replace('".NS"', '""')
-    db = re.sub(r'\["RELIANCE".*?\]', '["BTC-USD", "GC=F", "SI=F"]', db, flags=re.S)
+    db = re.sub(r'\["RELIANCE".*?\]', '["BTC-USD", "XAUT", "XAGT"]', db, flags=re.S)
     with open("dashboard.py", "w", encoding="utf-8") as f:
         f.write(db)
 
@@ -162,3 +172,5 @@ if os.path.exists(wf_path):
         f.write(wf)
 
 print("3ASSET_USD_CLONE_READY")
+
+

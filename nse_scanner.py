@@ -19,7 +19,7 @@ ASSETS = {k: v["name"] for k, v in ASSET_CONFIG.items()}
 
 YAHOO_FEEDS = {
     "XAUT": ["XAUT-USD", "PAXG-USD"],
-    "XAGT": ["XAGT-USD", "KAG-USD"],
+    "XAGT": ["KAG-USD"],
 }
 
 def get_feed_candidates(ticker):
@@ -174,3 +174,4 @@ def scan_full_nse_universe(min_prob=80.0):
         except Exception as e:
             print(f"Scan error on {t}: {e}")
     return sorted(signals, key=lambda x: x["prob"], reverse=True)
+
