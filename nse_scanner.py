@@ -5,10 +5,10 @@ import numpy as np
 ASSET_CONFIG = {
     "ADA-USD":  {"name": "Cardano (ADA)",        "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
     "AVAX-USD": {"name": "Avalanche (AVAX)",     "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
-    "SI=F":     {"name": "Silver Futures (XAG)", "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
+    "XAGUSD":   {"name": "Silver Spot (XAGUSD)", "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
     "DOGE-USD": {"name": "Dogecoin (DOGE)",      "mode": "SNAPBACK", "risk_pct": 0.030, "atr_mult": 2.1, "rr": 1.30},
     "SOL-USD":  {"name": "Solana (SOL)",         "mode": "SNAPBACK", "risk_pct": 0.028, "atr_mult": 2.2, "rr": 1.25},
-    "GC=F":     {"name": "Gold Futures (XAU)",   "mode": "SNAPBACK", "risk_pct": 0.025, "atr_mult": 2.2, "rr": 1.25},
+    "XAUUSD":   {"name": "Gold Spot (XAUUSD)",   "mode": "SNAPBACK", "risk_pct": 0.025, "atr_mult": 2.2, "rr": 1.25},
     "ETH-USD":  {"name": "Ethereum (ETH)",       "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
     "BTC-USD":  {"name": "Bitcoin (BTC)",        "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
     "BNB-USD":  {"name": "BNB (BNB)",            "mode": "MOMENTUM", "risk_pct": 0.022, "atr_mult": 2.2, "rr": 1.45},
@@ -16,9 +16,14 @@ ASSET_CONFIG = {
 }
 
 ASSETS = {k: v["name"] for k, v in ASSET_CONFIG.items()}
+YAHOO_MAP = {"XAUUSD": "XAUUSD=X", "XAGUSD": "XAGUSD=X"}
+
+def to_yahoo_ticker(ticker):
+    return YAHOO_MAP.get(ticker, ticker)
 
 def fetch_candles(ticker, interval="1h", range_str="90d"):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_str}"
+    yf_ticker = to_yahoo_ticker(ticker)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval={interval}&range={range_str}"
     r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8).json()
     res = r["chart"]["result"][0]
     q = res["indicators"]["quote"][0]

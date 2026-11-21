@@ -39,7 +39,8 @@ def get_current_equity(cur):
     return max(STARTING_CAPITAL + float(row[0] or 0.0), 200.0)
 
 def get_live_price(ticker):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
+    yf_ticker = nse_scanner.to_yahoo_ticker(ticker)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval=1m&range=1d"
     r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
     return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
 
