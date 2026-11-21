@@ -5,7 +5,9 @@ import nse_scanner
 DB_PATH = "paper_trades.db"
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-COOLDOWN_SECONDS = 1800  # 30-minute cooldown per asset after closing a trade
+STARTING_CAPITAL = 1000.0
+MAX_OPEN_TRADES = 5
+COOLDOWN_SECONDS = 7200
 
 def send_tg(msg):
     if not BOT_TOKEN or not CHAT_ID:
@@ -31,6 +33,10 @@ def init_db():
     )""")
     conn.commit()
     return conn
+
+def get_current_equity(cur):
+    row = cur.execute("SELECT COALESCE(SUM(pnl), 0.0) FROM trades WHERE status='CLOSED'").fetchone()
+    return max(STARTING_CAPITAL + float(row[0] or 0.0), 200.0)
 
 def get_live_price(ticker):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
@@ -58,56 +64,49 @@ def run_cycle(log_status=False):
             ltp = get_live_price(sym)
         except Exception:
             continue
-        init_risk = abs(entry - stop)
         if side == "LONG":
             new_hw = max(hw or entry, ltp)
-            # Only trail stop after trade moves at least +1R in profit
-            if (new_hw - entry) >= init_risk:
-                trail_stop = max(stop, round(new_hw - init_risk * 0.8, 2))
-            else:
-                trail_stop = stop
-            cur.execute("UPDATE trades SET high_water=?, final_stop=? WHERE id=?", (new_hw, trail_stop, tid))
-            if ltp >= target or ltp <= trail_stop:
-                reason = "Target Hit" if ltp >= target else ("Trailing Lock" if trail_stop > entry else "Stop-Loss Hit")
+            cur.execute("UPDATE trades SET high_water=? WHERE id=?", (new_hw, tid))
+            if ltp >= target or ltp <= stop:
+                reason = "Target Hit" if ltp >= target else "Stop-Loss Hit"
                 pnl = round((ltp - entry) * qty, 2)
                 cur.execute("UPDATE trades SET status='CLOSED', exit_price=?, exit_reason=?, exit_time=?, pnl=? WHERE id=?",
                             (ltp, reason, now_utc, pnl, tid))
-                send_tg(f"🔔 *3-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.2f}` → Exit: `${ltp:,.2f}`\nNet P&L: `${pnl:+,.2f}`")
+                send_tg(f"🔔 *10-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
         else:
             new_hw = min(hw or entry, ltp)
-            if (entry - new_hw) >= init_risk:
-                trail_stop = min(stop, round(new_hw + init_risk * 0.8, 2))
-            else:
-                trail_stop = stop
-            cur.execute("UPDATE trades SET high_water=?, final_stop=? WHERE id=?", (new_hw, trail_stop, tid))
-            if ltp <= target or ltp >= trail_stop:
-                reason = "Target Hit" if ltp <= target else ("Trailing Lock" if trail_stop < entry else "Stop-Loss Hit")
+            cur.execute("UPDATE trades SET high_water=? WHERE id=?", (new_hw, tid))
+            if ltp <= target or ltp >= stop:
+                reason = "Target Hit" if ltp <= target else "Stop-Loss Hit"
                 pnl = round((entry - ltp) * qty, 2)
                 cur.execute("UPDATE trades SET status='CLOSED', exit_price=?, exit_reason=?, exit_time=?, pnl=? WHERE id=?",
                             (ltp, reason, now_utc, pnl, tid))
-                send_tg(f"🔔 *3-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.2f}` → Exit: `${ltp:,.2f}`\nNet P&L: `${pnl:+,.2f}`")
+                send_tg(f"🔔 *10-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
     conn.commit()
 
     open_syms = {r[1] for r in cur.execute("SELECT id, symbol FROM trades WHERE status='OPEN'").fetchall()}
-    signals = nse_scanner.scan_full_nse_universe(min_prob=68.0)
+    signals = nse_scanner.scan_full_nse_universe(min_prob=65.0)
     if log_status:
-        print(f"[{now_utc}] Open={list(open_syms)} | 11-Skill Signals={[(s['symbol'], s['side'], s['prob'], s['reason']) for s in signals]}", flush=True)
+        print(f"[{now_utc}] Open={list(open_syms)} | Dual-Regime Signals={[(s['symbol'], s['mode'], s['side'], s['prob']) for s in signals]}", flush=True)
 
-    if len(open_syms) < 3:
+    if len(open_syms) < MAX_OPEN_TRADES:
+        equity = get_current_equity(cur)
         for sig in signals:
-            if sig["symbol"] in open_syms or len(open_syms) >= 3:
+            if sig["symbol"] in open_syms or len(open_syms) >= MAX_OPEN_TRADES:
                 continue
             if is_in_cooldown(cur, sig["symbol"]):
                 continue
             price = sig["price"]
-            qty = round(250.0 / price, 6)
+            risk_dollars = equity * sig["risk_pct"]
+            risk_per_unit = max(abs(price - sig["stop"]), price * 0.005)
+            qty = round(risk_dollars / risk_per_unit, 6)
             cur.execute("""
                 INSERT INTO trades (symbol, side, status, qty, entry_price, high_water, final_stop, target_price, timemachine_prob, entry_reason, entry_time)
                 VALUES (?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
             """, (sig["symbol"], sig["side"], qty, price, price, sig["stop"], sig["target"], sig["prob"], sig["reason"], now_utc))
             conn.commit()
             open_syms.add(sig["symbol"])
-            send_tg(f"🚀 *New 11-Skill Trade ({sig['symbol']})*\nAction: *{sig['side']}* | Prob: *{sig['prob']}%*\nEntry: `${price:,.2f}` | SL: `${sig['stop']:,.2f}` | Target: `${sig['target']:,.2f}`\nSkills: {sig['reason']}")
+            send_tg(f"🚀 *New {sig['mode']} Trade ({sig['symbol']})*\nAction: *{sig['side']}* | Est. Win Prob: *{sig['prob']}%*\nEntry: `${price:,.4f}` | SL: `${sig['stop']:,.4f}` | Target: `${sig['target']:,.4f}`\nCompounding Risk: `${risk_dollars:,.2f}` ({sig['risk_pct']*100:.1f}%)")
     conn.close()
 
 if __name__ == "__main__":
@@ -119,4 +118,4 @@ if __name__ == "__main__":
         except Exception as e:
             print("Cycle warning:", e, flush=True)
         step += 1
-        time.sleep(10)
+        time.sleep(15)
