@@ -6,8 +6,8 @@ DB_PATH = "paper_trades.db"
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 STARTING_CAPITAL = 1000.0
-MAX_OPEN_TRADES = 5
-COOLDOWN_SECONDS = 7200
+MAX_OPEN_TRADES = 3
+COOLDOWN_SECONDS = 14400  # 4-hour cooldown per symbol (~4-6 high-conviction scalps/day)
 
 def send_tg(msg):
     if not BOT_TOKEN or not CHAT_ID:
@@ -63,11 +63,12 @@ def is_in_cooldown(cur, symbol):
     except Exception:
         return False
 
-def run_cycle(log_status=False):
+def run_cycle(run_scan=True, log_status=False):
     conn = init_db()
     cur = conn.cursor()
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    # Check open SL/TP every 15 seconds
     open_rows = cur.execute("SELECT id, symbol, side, qty, entry_price, high_water, final_stop, target_price FROM trades WHERE status='OPEN'").fetchall()
     for tid, sym, side, qty, entry, hw, stop, target in open_rows:
         try:
@@ -82,7 +83,7 @@ def run_cycle(log_status=False):
                 pnl = round((ltp - entry) * qty, 2)
                 cur.execute("UPDATE trades SET status='CLOSED', exit_price=?, exit_reason=?, exit_time=?, pnl=? WHERE id=?",
                             (ltp, reason, now_utc, pnl, tid))
-                send_tg(f"🔔 *10-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
+                send_tg(f"🔔 *Scalp Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
         else:
             new_hw = min(hw or entry, ltp)
             cur.execute("UPDATE trades SET high_water=? WHERE id=?", (new_hw, tid))
@@ -91,32 +92,34 @@ def run_cycle(log_status=False):
                 pnl = round((entry - ltp) * qty, 2)
                 cur.execute("UPDATE trades SET status='CLOSED', exit_price=?, exit_reason=?, exit_time=?, pnl=? WHERE id=?",
                             (ltp, reason, now_utc, pnl, tid))
-                send_tg(f"🔔 *10-Asset Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
+                send_tg(f"🔔 *Scalp Exit ({sym})*\nSide: `{side}` | Reason: *{reason}*\nEntry: `${entry:,.4f}` → Exit: `${ltp:,.4f}`\nNet P&L: `${pnl:+,.2f}`")
     conn.commit()
 
-    open_syms = {r[1] for r in cur.execute("SELECT id, symbol FROM trades WHERE status='OPEN'").fetchall()}
-    signals = nse_scanner.scan_full_nse_universe(min_prob=65.0)
-    if log_status:
-        print(f"[{now_utc}] Open={list(open_syms)} | Dual-Regime Signals={[(s['symbol'], s['mode'], s['side'], s['prob']) for s in signals]}", flush=True)
+    # Scan 15m + 5m candles every 60 seconds to avoid Yahoo rate limits
+    if run_scan:
+        open_syms = {r[1] for r in cur.execute("SELECT id, symbol FROM trades WHERE status='OPEN'").fetchall()}
+        signals = nse_scanner.scan_full_nse_universe(min_prob=80.0)
+        if log_status:
+            print(f"[{now_utc}] Open={list(open_syms)} | Strict-Scalp Signals={[(s['symbol'], s['side'], s['price']) for s in signals]}", flush=True)
 
-    if len(open_syms) < MAX_OPEN_TRADES:
-        equity = get_current_equity(cur)
-        for sig in signals:
-            if sig["symbol"] in open_syms or len(open_syms) >= MAX_OPEN_TRADES:
-                continue
-            if is_in_cooldown(cur, sig["symbol"]):
-                continue
-            price = sig["price"]
-            risk_dollars = equity * sig["risk_pct"]
-            risk_per_unit = max(abs(price - sig["stop"]), price * 0.005)
-            qty = round(risk_dollars / risk_per_unit, 6)
-            cur.execute("""
-                INSERT INTO trades (symbol, side, status, qty, entry_price, high_water, final_stop, target_price, timemachine_prob, entry_reason, entry_time)
-                VALUES (?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (sig["symbol"], sig["side"], qty, price, price, sig["stop"], sig["target"], sig["prob"], sig["reason"], now_utc))
-            conn.commit()
-            open_syms.add(sig["symbol"])
-            send_tg(f"🚀 *New {sig['mode']} Trade ({sig['symbol']})*\nAction: *{sig['side']}* | Est. Win Prob: *{sig['prob']}%*\nEntry: `${price:,.4f}` | SL: `${sig['stop']:,.4f}` | Target: `${sig['target']:,.4f}`\nCompounding Risk: `${risk_dollars:,.2f}` ({sig['risk_pct']*100:.1f}%)")
+        if len(open_syms) < MAX_OPEN_TRADES:
+            equity = get_current_equity(cur)
+            for sig in signals:
+                if sig["symbol"] in open_syms or len(open_syms) >= MAX_OPEN_TRADES:
+                    continue
+                if is_in_cooldown(cur, sig["symbol"]):
+                    continue
+                price = sig["price"]
+                risk_dollars = equity * sig["risk_pct"]
+                risk_per_unit = max(abs(price - sig["stop"]), price * 0.003)
+                qty = round(risk_dollars / risk_per_unit, 6)
+                cur.execute("""
+                    INSERT INTO trades (symbol, side, status, qty, entry_price, high_water, final_stop, target_price, timemachine_prob, entry_reason, entry_time)
+                    VALUES (?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (sig["symbol"], sig["side"], qty, price, price, sig["stop"], sig["target"], sig["prob"], sig["reason"], now_utc))
+                conn.commit()
+                open_syms.add(sig["symbol"])
+                send_tg(f"⚡ *Strict 5m Scalp ({sig['symbol']})*\nAction: *{sig['side']}* | Setup: *{sig['reason']}*\nEntry: `${price:,.4f}` | SL: `${sig['stop']:,.4f}` | Target: `${sig['target']:,.4f}`\nRisk: `${risk_dollars:,.2f}` (2.0%)")
     conn.close()
 
 if __name__ == "__main__":
@@ -124,7 +127,7 @@ if __name__ == "__main__":
     step = 0
     while time.time() - start < 870:
         try:
-            run_cycle(log_status=(step % 12 == 0))
+            run_cycle(run_scan=(step % 4 == 0), log_status=(step % 12 == 0))
         except Exception as e:
             print("Cycle warning:", e, flush=True)
         step += 1

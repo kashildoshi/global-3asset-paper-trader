@@ -3,16 +3,16 @@ import pandas as pd
 import numpy as np
 
 ASSET_CONFIG = {
-    "ADA-USD":  {"name": "Cardano (ADA)",        "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
-    "AVAX-USD": {"name": "Avalanche (AVAX)",     "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
-    "XAGT":     {"name": "Silver Token (XAGT)",  "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
-    "DOGE-USD": {"name": "Dogecoin (DOGE)",      "mode": "SNAPBACK", "risk_pct": 0.030, "atr_mult": 2.1, "rr": 1.30},
-    "SOL-USD":  {"name": "Solana (SOL)",         "mode": "SNAPBACK", "risk_pct": 0.028, "atr_mult": 2.2, "rr": 1.25},
-    "XAUT":     {"name": "Tether Gold (XAUT)",   "mode": "SNAPBACK", "risk_pct": 0.025, "atr_mult": 2.2, "rr": 1.25},
-    "ETH-USD":  {"name": "Ethereum (ETH)",       "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
-    "BTC-USD":  {"name": "Bitcoin (BTC)",        "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
-    "BNB-USD":  {"name": "BNB (BNB)",            "mode": "MOMENTUM", "risk_pct": 0.022, "atr_mult": 2.2, "rr": 1.45},
-    "XRP-USD":  {"name": "XRP (XRP)",            "mode": "MOMENTUM", "risk_pct": 0.022, "atr_mult": 2.2, "rr": 1.45},
+    "ADA-USD":  {"name": "Cardano (ADA)",        "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "AVAX-USD": {"name": "Avalanche (AVAX)",     "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "XAGT":     {"name": "Silver Token (XAGT)",  "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "DOGE-USD": {"name": "Dogecoin (DOGE)",      "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "SOL-USD":  {"name": "Solana (SOL)",         "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "XAUT":     {"name": "Tether Gold (XAUT)",   "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "ETH-USD":  {"name": "Ethereum (ETH)",       "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "BTC-USD":  {"name": "Bitcoin (BTC)",        "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "BNB-USD":  {"name": "BNB (BNB)",            "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
+    "XRP-USD":  {"name": "XRP (XRP)",            "risk_pct": 0.020, "atr_mult": 2.2, "rr": 1.35},
 }
 
 ASSETS = {k: v["name"] for k, v in ASSET_CONFIG.items()}
@@ -25,7 +25,7 @@ YAHOO_FEEDS = {
 def get_feed_candidates(ticker):
     return YAHOO_FEEDS.get(ticker, [ticker])
 
-def fetch_candles(ticker, interval="1h", range_str="30d"):
+def fetch_candles(ticker, interval="5m", range_str="7d"):
     last_err = None
     for yf_ticker in get_feed_candidates(ticker):
         try:
@@ -46,7 +46,7 @@ def fetch_candles(ticker, interval="1h", range_str="30d"):
                 return df
         except Exception as e:
             last_err = e
-    raise RuntimeError(f"No valid 24/7 candles for {ticker}: {last_err}")
+    raise RuntimeError(f"No valid {interval} candles for {ticker}: {last_err}")
 
 def add_indicators(df):
     df = df.copy()
@@ -56,8 +56,8 @@ def add_indicators(df):
 
     sma20 = df["close"].rolling(20).mean()
     std20 = df["close"].rolling(20).std().replace(0, np.nan)
-    df["bb_u"] = sma20 + 2.0 * std20
-    df["bb_l"] = sma20 - 2.0 * std20
+    df["bb_u"] = sma20 + 2.2 * std20
+    df["bb_l"] = sma20 - 2.2 * std20
 
     d = df["close"].diff()
     g = d.clip(lower=0).rolling(14).mean()
@@ -86,68 +86,89 @@ def add_indicators(df):
     df["adx"] = dx.rolling(14).mean().fillna(0)
     return df
 
-def evaluate_slice(ticker, df):
-    if len(df) < 205:
+def evaluate_mtf_scalp(ticker, df_15m, df_5m):
+    if len(df_15m) < 205 or len(df_5m) < 205:
         return None
     cfg = ASSET_CONFIG[ticker]
-    b = df.iloc[-1]
-    p = df.iloc[-2]
+
+    m15 = df_15m.iloc[-1]
+    b = df_5m.iloc[-1]
+    p = df_5m.iloc[-2]
+
     cl = float(b["close"])
     atr = float(b["atr"])
-    if np.isnan(atr) or atr <= 0:
+    if np.isnan(atr) or atr <= 0 or (atr / cl) < 0.0025:
         return None
+
+    vol_avg = max(float(df_5m["volume"].tail(20).iloc[:-1].mean()), 1.0)
+    vol_surge = float(b["volume"]) >= vol_avg * 1.50
+    if not vol_surge:
+        return None
+
+    # Gate 1 & 2: 15m Macro Trend + Strong ADX (>= 26)
+    bull_15m = (m15["close"] > m15["ema50"] > m15["ema200"]) and (m15["adx"] >= 26.0)
+    bear_15m = (m15["close"] < m15["ema50"] < m15["ema200"]) and (m15["adx"] >= 26.0)
 
     side = None
     skills = []
 
-    if cfg["mode"] == "SNAPBACK":
-        if cl > b["ema200"] and b["ema50"] > b["ema200"] and float(p["low"]) < float(p["bb_l"]) and cl > float(b["bb_l"]) and cl > float(b["open"]):
+    # Gates 3–6: 5m Liquidity Sweep + Reversal Break + RSI Sweet Spot
+    if bull_15m:
+        bb_snap = (float(p["low"]) < float(p["bb_l"])) and (cl > float(b["bb_l"]))
+        ema_spring = (float(p["low"]) <= float(p["ema20"])) and (cl > float(b["ema20"])) and (b["macd"] > b["macd_sig"])
+        candle_confirm = (cl > float(b["open"])) and (cl > float(p["high"])) and (30.0 <= b["rsi14"] <= 46.0)
+        if (bb_snap or ema_spring) and candle_confirm:
             side = "LONG"
-            skills = ["S1:Above-EMA200", "S2:EMA50>200", "S3:Lower-BB-Pierce", "S4:Reversal-Snap-In"]
-            if b["rsi14"] < 47.0: skills.append("S5:RSI-Recovery")
-            if cl > p["high"]: skills.append("S6:Prior-High-Break")
-        elif cl < b["ema200"] and b["ema50"] < b["ema200"] and float(p["high"]) > float(p["bb_u"]) and cl < float(b["bb_u"]) and cl < float(b["open"]):
+            skills = [
+                "S1:15m-EMA50>200",
+                f"S2:15m-ADX({m15['adx']:.0f})",
+                "S3:5m-BB-Sweep" if bb_snap else "S3:5m-EMA20-Spring",
+                "S4:5m-Vol-1.5x",
+                "S5:5m-PriorHigh-Break",
+                f"S6:5m-RSI({b['rsi14']:.0f})"
+            ]
+    elif bear_15m:
+        bb_snap = (float(p["high"]) > float(p["bb_u"])) and (cl < float(b["bb_u"]))
+        ema_reject = (float(p["high"]) >= float(p["ema20"])) and (cl < float(b["ema20"])) and (b["macd"] < b["macd_sig"])
+        candle_confirm = (cl < float(b["open"])) and (cl < float(p["low"])) and (54.0 <= b["rsi14"] <= 70.0)
+        if (bb_snap or ema_reject) and candle_confirm:
             side = "SHORT"
-            skills = ["S1:Below-EMA200", "S2:EMA50<200", "S3:Upper-BB-Pierce", "S4:Reversal-Snap-In"]
-            if b["rsi14"] > 53.0: skills.append("S5:RSI-Reject")
-            if cl < p["low"]: skills.append("S6:Prior-Low-Break")
-    else:
-        vol_avg = max(float(df["volume"].tail(20).mean()), 1.0)
-        if b["adx"] >= 24.0 and float(b["volume"]) >= vol_avg * 1.15:
-            if cl > b["ema200"] and b["ema20"] > b["ema50"] > b["ema200"] and p["low"] <= p["ema20"] and cl > b["ema20"] and cl > p["high"] and b["macd"] > b["macd_sig"] and 50.0 <= b["rsi14"] <= 68.0:
-                side = "LONG"
-                skills = ["S1:EMA20>50>200", "S2:ADX>=24", "S3:EMA20-Spring", "S4:MACD-Bull", "S5:Vol-Surge", "S6:Breakout-Close"]
-            elif cl < b["ema200"] and b["ema20"] < b["ema50"] < b["ema200"] and p["high"] >= p["ema20"] and cl < b["ema20"] and cl < p["low"] and b["macd"] < b["macd_sig"] and 32.0 <= b["rsi14"] <= 50.0:
-                side = "SHORT"
-                skills = ["S1:EMA20<50<200", "S2:ADX>=24", "S3:EMA20-Reject", "S4:MACD-Bear", "S5:Vol-Surge", "S6:Breakdown-Close"]
+            skills = [
+                "S1:15m-EMA50<200",
+                f"S2:15m-ADX({m15['adx']:.0f})",
+                "S3:5m-BB-Reject" if bb_snap else "S3:5m-EMA20-Reject",
+                "S4:5m-Vol-1.5x",
+                "S5:5m-PriorLow-Break",
+                f"S6:5m-RSI({b['rsi14']:.0f})"
+            ]
 
     if not side:
         return None
 
-    risk_dist = max(atr * cfg["atr_mult"], cl * 0.008)
+    risk_dist = max(atr * cfg["atr_mult"], cl * 0.0045)
     target_dist = risk_dist * cfg["rr"]
-    prob = round(min(63.0 + len(skills) * 4.5, 93.0), 1)
 
     return {
         "symbol": ticker,
         "name": cfg["name"],
-        "mode": cfg["mode"],
+        "mode": "MTF-SCALP-5M",
         "risk_pct": cfg["risk_pct"],
         "rr": cfg["rr"],
         "side": side,
         "price": round(cl, 4),
         "stop": round(cl - risk_dist if side == "LONG" else cl + risk_dist, 4),
         "target": round(cl + target_dist if side == "LONG" else cl - target_dist, 4),
-        "prob": prob,
-        "reason": f"{cfg['mode']} ({len(skills)}/6 | {cfg['rr']}R) | " + ", ".join(skills[:4])
+        "prob": 84.0,
+        "reason": f"7-Gate Scalp ({cfg['rr']}R) | " + ", ".join(skills[:4])
     }
 
-def scan_full_nse_universe(min_prob=65.0):
+def scan_full_nse_universe(min_prob=80.0):
     signals = []
     for t in ASSETS:
         try:
-            df = add_indicators(fetch_candles(t, "1h", "30d")).iloc[:-1]
-            sig = evaluate_slice(t, df)
+            df_15m = add_indicators(fetch_candles(t, "15m", "15d")).iloc[:-1]
+            df_5m = add_indicators(fetch_candles(t, "5m", "5d")).iloc[:-1]
+            sig = evaluate_mtf_scalp(t, df_15m, df_5m)
             if sig and sig["prob"] >= min_prob:
                 signals.append(sig)
         except Exception as e:
