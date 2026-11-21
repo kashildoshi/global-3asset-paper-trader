@@ -17,7 +17,6 @@ ASSET_CONFIG = {
 
 ASSETS = {k: v["name"] for k, v in ASSET_CONFIG.items()}
 
-# Primary 24/7 token tickers with 1oz physical-backed fallback if Yahoo lacks 1h bars
 YAHOO_FEEDS = {
     "XAUT": ["XAUT-USD", "PAXG-USD"],
     "XAGT": ["XAGT-USD", "KAG-USD"],
