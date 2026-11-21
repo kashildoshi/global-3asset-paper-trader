@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 
-# Per-asset regime, risk tier, stop multiplier, and reward-to-risk target
 ASSET_CONFIG = {
     "ADA-USD":  {"name": "Cardano (ADA)",        "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
     "AVAX-USD": {"name": "Avalanche (AVAX)",     "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
@@ -84,7 +83,6 @@ def evaluate_slice(ticker, df):
     skills = []
 
     if cfg["mode"] == "SNAPBACK":
-        # Mean-Reversion Snapback inside Macro Trend
         if cl > b["ema200"] and b["ema50"] > b["ema200"] and float(p["low"]) < float(p["bb_l"]) and cl > float(b["bb_l"]) and cl > float(b["open"]):
             side = "LONG"
             skills = ["S1:Above-EMA200", "S2:EMA50>200", "S3:Lower-BB-Pierce", "S4:Reversal-Snap-In"]
@@ -96,14 +94,12 @@ def evaluate_slice(ticker, df):
             if b["rsi14"] > 53.0: skills.append("S5:RSI-Reject")
             if cl < p["low"]: skills.append("S6:Prior-Low-Break")
     else:
-        # MOMENTUM Regime for Trend-Breakout Coins (BNB-USD & XRP-USD)
         vol_avg = max(float(df["volume"].tail(20).mean()), 1.0)
-        vol_ok = float(b["volume"]) >= vol_avg * 1.15
-        if b["adx"] >= 24.0 and vol_ok:
-            if cl > b["ema200"] and b["ema20"] > b["ema50"] and b["ema50"] > b["ema200"] and p["low"] <= p["ema20"] and cl > b["ema20"] and cl > p["high"] and b["macd"] > b["macd_sig"] and 50.0 <= b["rsi14"] <= 68.0:
+        if b["adx"] >= 24.0 and float(b["volume"]) >= vol_avg * 1.15:
+            if cl > b["ema200"] and b["ema20"] > b["ema50"] > b["ema200"] and p["low"] <= p["ema20"] and cl > b["ema20"] and cl > p["high"] and b["macd"] > b["macd_sig"] and 50.0 <= b["rsi14"] <= 68.0:
                 side = "LONG"
                 skills = ["S1:EMA20>50>200", "S2:ADX>=24", "S3:EMA20-Spring", "S4:MACD-Bull", "S5:Vol-Surge", "S6:Breakout-Close"]
-            elif cl < b["ema200"] and b["ema20"] < b["ema50"] and b["ema50"] < b["ema200"] and p["high"] >= p["ema20"] and cl < b["ema20"] and cl < p["low"] and b["macd"] < b["macd_sig"] and 32.0 <= b["rsi14"] <= 50.0:
+            elif cl < b["ema200"] and b["ema20"] < b["ema50"] < b["ema200"] and p["high"] >= p["ema20"] and cl < b["ema20"] and cl < p["low"] and b["macd"] < b["macd_sig"] and 32.0 <= b["rsi14"] <= 50.0:
                 side = "SHORT"
                 skills = ["S1:EMA20<50<200", "S2:ADX>=24", "S3:EMA20-Reject", "S4:MACD-Bear", "S5:Vol-Surge", "S6:Breakdown-Close"]
 
