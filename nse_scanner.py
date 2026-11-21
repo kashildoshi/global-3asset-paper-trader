@@ -5,10 +5,10 @@ import numpy as np
 ASSET_CONFIG = {
     "ADA-USD":  {"name": "Cardano (ADA)",        "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
     "AVAX-USD": {"name": "Avalanche (AVAX)",     "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
-    "XAGUSD":   {"name": "Silver Spot (XAGUSD)", "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
+    "XAGT":     {"name": "Silver Token (XAGT)",  "mode": "SNAPBACK", "risk_pct": 0.032, "atr_mult": 2.1, "rr": 1.35},
     "DOGE-USD": {"name": "Dogecoin (DOGE)",      "mode": "SNAPBACK", "risk_pct": 0.030, "atr_mult": 2.1, "rr": 1.30},
     "SOL-USD":  {"name": "Solana (SOL)",         "mode": "SNAPBACK", "risk_pct": 0.028, "atr_mult": 2.2, "rr": 1.25},
-    "XAUUSD":   {"name": "Gold Spot (XAUUSD)",   "mode": "SNAPBACK", "risk_pct": 0.025, "atr_mult": 2.2, "rr": 1.25},
+    "XAUT":     {"name": "Tether Gold (XAUT)",   "mode": "SNAPBACK", "risk_pct": 0.025, "atr_mult": 2.2, "rr": 1.25},
     "ETH-USD":  {"name": "Ethereum (ETH)",       "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
     "BTC-USD":  {"name": "Bitcoin (BTC)",        "mode": "SNAPBACK", "risk_pct": 0.022, "atr_mult": 2.3, "rr": 1.25},
     "BNB-USD":  {"name": "BNB (BNB)",            "mode": "MOMENTUM", "risk_pct": 0.022, "atr_mult": 2.2, "rr": 1.45},
@@ -16,24 +16,38 @@ ASSET_CONFIG = {
 }
 
 ASSETS = {k: v["name"] for k, v in ASSET_CONFIG.items()}
-YAHOO_MAP = {"XAUUSD": "XAUUSD=X", "XAGUSD": "XAGUSD=X"}
 
-def to_yahoo_ticker(ticker):
-    return YAHOO_MAP.get(ticker, ticker)
+# Primary 24/7 token tickers with 1oz physical-backed fallback if Yahoo lacks 1h bars
+YAHOO_FEEDS = {
+    "XAUT": ["XAUT-USD", "PAXG-USD"],
+    "XAGT": ["XAGT-USD", "KAG-USD"],
+}
 
-def fetch_candles(ticker, interval="1h", range_str="90d"):
-    yf_ticker = to_yahoo_ticker(ticker)
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval={interval}&range={range_str}"
-    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8).json()
-    res = r["chart"]["result"][0]
-    q = res["indicators"]["quote"][0]
-    df = pd.DataFrame({
-        "time": pd.to_datetime(res["timestamp"], unit="s", utc=True),
-        "open": q["open"], "high": q["high"], "low": q["low"],
-        "close": q["close"], "volume": q["volume"]
-    }).dropna(subset=["open", "high", "low", "close"])
-    df["volume"] = df["volume"].fillna(1.0)
-    return df
+def get_feed_candidates(ticker):
+    return YAHOO_FEEDS.get(ticker, [ticker])
+
+def fetch_candles(ticker, interval="1h", range_str="30d"):
+    last_err = None
+    for yf_ticker in get_feed_candidates(ticker):
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval={interval}&range={range_str}"
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8).json()
+            results = r.get("chart", {}).get("result")
+            if not results:
+                continue
+            res = results[0]
+            q = res["indicators"]["quote"][0]
+            df = pd.DataFrame({
+                "time": pd.to_datetime(res["timestamp"], unit="s", utc=True),
+                "open": q["open"], "high": q["high"], "low": q["low"],
+                "close": q["close"], "volume": q["volume"]
+            }).dropna(subset=["open", "high", "low", "close"])
+            if len(df) >= 205:
+                df["volume"] = df["volume"].fillna(1.0)
+                return df
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"No valid 24/7 candles for {ticker}: {last_err}")
 
 def add_indicators(df):
     df = df.copy()

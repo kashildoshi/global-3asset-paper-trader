@@ -39,10 +39,19 @@ def get_current_equity(cur):
     return max(STARTING_CAPITAL + float(row[0] or 0.0), 200.0)
 
 def get_live_price(ticker):
-    yf_ticker = nse_scanner.to_yahoo_ticker(ticker)
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval=1m&range=1d"
-    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
-    return float(r["chart"]["result"][0]["meta"]["regularMarketPrice"])
+    for yf_ticker in nse_scanner.get_feed_candidates(ticker):
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?interval=1m&range=1d"
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
+            results = r.get("chart", {}).get("result")
+            if not results:
+                continue
+            price = results[0]["meta"].get("regularMarketPrice")
+            if price is not None:
+                return float(price)
+        except Exception:
+            continue
+    raise RuntimeError(f"Live price unavailable for {ticker}")
 
 def is_in_cooldown(cur, symbol):
     row = cur.execute("SELECT exit_time FROM trades WHERE symbol=? AND status='CLOSED' ORDER BY id DESC LIMIT 1", (symbol,)).fetchone()
